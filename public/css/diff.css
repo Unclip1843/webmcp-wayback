@@ -1,0 +1,146 @@
+/* Diff view styles */
+.diff-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.diff-summary-card {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.diff-summary-card.added {
+  background: var(--diff-added-bg);
+  border: 1px solid var(--diff-added-border);
+  color: var(--color-success);
+}
+
+.diff-summary-card.removed {
+  background: var(--diff-removed-bg);
+  border: 1px solid var(--diff-removed-border);
+  color: var(--color-danger);
+}
+
+.diff-summary-card.changed {
+  background: var(--diff-changed-bg);
+  border: 1px solid var(--diff-changed-border);
+  color: var(--color-warning);
+}
+
+.diff-summary-value {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.diff-summary-label {
+  font-size: var(--font-size-sm);
+  margin-top: var(--space-1);
+}
+
+/* Diff items */
+.diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.diff-item {
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.diff-item.diff-added {
+  background: var(--diff-added-bg);
+  border: 1px solid var(--diff-added-border);
+}
+
+.diff-item.diff-removed {
+  background: var(--diff-removed-bg);
+  border: 1px solid var(--diff-removed-border);
+}
+
+.diff-item.diff-changed {
+  background: var(--diff-changed-bg);
+  border: 1px solid var(--diff-changed-border);
+}
+
+.diff-item-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.diff-item-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.diff-added .diff-item-label {
+  background: var(--diff-added-border);
+  color: #fff;
+}
+
+.diff-removed .diff-item-label {
+  background: var(--diff-removed-border);
+  color: #fff;
+}
+
+.diff-changed .diff-item-label {
+  background: var(--diff-changed-border);
+  color: #fff;
+}
+
+.diff-item-name {
+  font-weight: 600;
+}
+
+.diff-item-detail {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+/* Side by side diff */
+.diff-side-by-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.diff-side-header {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-default);
+  margin-bottom: var(--space-3);
+  font-family: var(--font-mono);
+}
+
+.diff-field-change {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) 0;
+}
+
+.diff-field-name {
+  color: var(--text-muted);
+  min-width: 100px;
+}
+
+.diff-field-old {
+  color: var(--color-danger);
+  text-decoration: line-through;
+}
+
+.diff-field-new {
+  color: var(--color-success);
+}
