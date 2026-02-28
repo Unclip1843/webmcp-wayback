@@ -105,7 +105,37 @@ export function renderError(container, message, onRetry) {
       onRetry
         ? h("button", { className: "retry-btn", onClick: onRetry }, "Retry")
         : null,
-    ])
+    ]),
+  );
+}
+
+/** Create a tab navigation bar for site views */
+export function createTabNav(siteId, activeTab) {
+  const tabs = [
+    { key: "overview", path: `/site/${siteId}`, label: "Overview" },
+    {
+      key: "capabilities",
+      path: `/site/${siteId}/capabilities`,
+      label: "Capabilities",
+    },
+    { key: "gallery", path: `/site/${siteId}/gallery`, label: "Gallery" },
+    { key: "mirror", path: `/site/${siteId}/mirror`, label: "Mirror" },
+    { key: "timeline", path: `/site/${siteId}/timeline`, label: "Timeline" },
+    { key: "network", path: `/site/${siteId}/network`, label: "Network" },
+    { key: "diff", path: `/site/${siteId}/diff`, label: "Visual Diff" },
+    { key: "analytics", path: `/site/${siteId}/analytics`, label: "Trends" },
+    { key: "api", path: `/site/${siteId}/api`, label: "API" },
+  ];
+  return h(
+    "nav",
+    { className: "tab-nav" },
+    tabs.map((t) =>
+      h(
+        "a",
+        { href: `#${t.path}`, className: t.key === activeTab ? "active" : "" },
+        t.label,
+      ),
+    ),
   );
 }
 
@@ -117,6 +147,6 @@ export function renderEmpty(container, icon, title, description) {
       h("div", { className: "empty-state-icon" }, icon),
       h("div", { className: "empty-state-title" }, title),
       description ? h("p", {}, description) : null,
-    ])
+    ]),
   );
 }

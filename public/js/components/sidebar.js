@@ -1,10 +1,10 @@
 import { h, setContent } from "../utils.js";
 import { subscribe } from "../state.js";
-import { navigate, currentPath } from "../router.js";
+import { currentPath } from "../router.js";
 
 export function renderSidebar(container) {
   const brand = h("div", { className: "sidebar-brand" }, [
-    h("span", { className: "brand-icon" }, "\u{1F578}\u{FE0F}"),
+    h("span", { className: "brand-icon" }, "\uD83D\uDD78\uFE0F"),
     h("span", {}, "WebMCP Wayback"),
   ]);
 
@@ -13,9 +13,12 @@ export function renderSidebar(container) {
 
   setContent(container, brand, mainNav, siteNav);
 
-  // Main navigation links
   function updateMainNav() {
-    setContent(mainNav, navLink("/", "\u{1F3E0}", "Dashboard"));
+    setContent(mainNav,
+      navLink("/", "Home"),
+      navLink("/sites", "Sites"),
+      navLink("/analytics", "Insights"),
+    );
   }
 
   // Site-specific nav (shown when viewing a site)
@@ -27,15 +30,33 @@ export function renderSidebar(container) {
     const id = site.id;
     setContent(
       siteNav,
+      // Back link
+      h("a", { href: "#/sites", className: "sidebar-back" }, "\u2190 Back to Sites"),
+      // Site title
       h("div", { className: "sidebar-section" }, site.title || site.id),
-      h("nav", { className: "sidebar-nav" }, [
-        navLink(`/site/${id}`, "\u{1F4CB}", "Overview"),
-        navLink(`/site/${id}/capabilities`, "\u{26A1}", "Capabilities"),
-        navLink(`/site/${id}/timeline`, "\u{1F552}", "Timeline"),
-        navLink(`/site/${id}/api`, "\u{1F517}", "API Explorer"),
-        navLink(`/site/${id}/mirror`, "\u{1F5BC}\u{FE0F}", "Mirror"),
+      // Explore group
+      h("div", { className: "sidebar-group-label" }, "Explore"),
+      h("nav", { className: "sidebar-nav sidebar-nav-grouped" }, [
+        navLink(`/site/${id}`, "Overview"),
+        navLink(`/site/${id}/capabilities`, "Capabilities"),
+        navLink(`/site/${id}/gallery`, "Gallery"),
+        navLink(`/site/${id}/mirror`, "Mirror"),
+      ]),
+      // Analyze group
+      h("div", { className: "sidebar-group-label" }, "Analyze"),
+      h("nav", { className: "sidebar-nav sidebar-nav-grouped" }, [
+        navLink(`/site/${id}/timeline`, "Timeline"),
+        navLink(`/site/${id}/analytics`, "Trends"),
+        navLink(`/site/${id}/network`, "Network"),
+        navLink(`/site/${id}/diff`, "Visual Diff"),
+      ]),
+      // Develop group
+      h("div", { className: "sidebar-group-label" }, "Develop"),
+      h("nav", { className: "sidebar-nav sidebar-nav-grouped" }, [
+        navLink(`/site/${id}/api`, "API Explorer"),
       ]),
     );
+    highlightActive();
   });
 
   updateMainNav();
@@ -45,11 +66,8 @@ export function renderSidebar(container) {
   highlightActive();
 }
 
-function navLink(path, icon, label) {
-  const a = h("a", { href: `#${path}` }, [
-    h("span", {}, icon),
-    h("span", {}, label),
-  ]);
+function navLink(path, label) {
+  const a = h("a", { href: `#${path}` }, label);
   if (currentPath() === path) a.classList.add("active");
   return a;
 }

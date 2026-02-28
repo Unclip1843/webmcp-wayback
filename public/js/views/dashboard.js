@@ -1,113 +1,77 @@
-import { h, setContent, renderSkeletons, renderError, renderEmpty, formatNumber, formatDate, capTypeColor } from "../utils.js";
+import { h, setContent, renderSkeletons, renderError, formatNumber, formatDate, capTypeColor } from "../utils.js";
 import { fetchSites, fetchStats } from "../api.js";
 import { setState } from "../state.js";
 import { navigate } from "../router.js";
-import { createSearchInput } from "../components/search.js";
-import { typeBadge } from "../components/badge.js";
-
-const CAP_TYPES = ["form", "search", "navigation", "api", "action", "download"];
 
 export async function renderDashboard(container) {
   setState("currentSite", null);
+  setState("breadcrumbs", [{ label: "Home" }]);
 
   setContent(container, h("div", { id: "dashboard" }));
   const root = container.querySelector("#dashboard");
 
-  // Header
+  // Hero section
   root.append(
-    h("div", { className: "content-header" }, [
-      h("h1", {}, "Site Capability Maps"),
-      h("p", {}, "Browse, search, and compare website capabilities over time."),
+    h("div", { className: "home-hero" }, [
+      h("h1", {}, "WebMCP Wayback"),
+      h("p", {}, "Browse, search, and compare website capability maps over time."),
     ])
   );
 
-  // Stats
+  // Stats row
   const statsRow = h("div", { className: "dashboard-stats" });
   root.append(statsRow);
 
-  // Filters
-  let activeType = null;
-  let searchQuery = "";
+  // Quick actions
+  root.append(
+    h("div", { className: "quick-actions" }, [
+      quickAction("Browse Sites", "Explore all mapped sites", "/sites"),
+      quickAction("Search", "Find capabilities across sites", null, () => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+      }),
+      quickAction("View Insights", "Global analytics overview", "/analytics"),
+    ])
+  );
 
-  const filtersRow = h("div", { className: "dashboard-filters" });
-  const searchInput = createSearchInput("Filter sites...", (val) => {
-    searchQuery = val;
-    renderGrid();
-  });
-
-  const pillGroup = h("div", { className: "pill-group" }, [
-    createPill("All", null),
-    ...CAP_TYPES.map((t) => createPill(t, t)),
+  // Recent sites section
+  const recentSection = h("div", { className: "mt-5" }, [
+    h("div", { className: "flex items-center justify-between mb-4" }, [
+      h("h2", { style: { fontSize: "var(--font-size-lg)", fontWeight: "600" } }, "Recent Sites"),
+      h("a", { href: "#/sites", style: { color: "var(--text-link)", fontSize: "var(--font-size-sm)" } }, "View all \u2192"),
+    ]),
   ]);
+  const recentGrid = h("div", { className: "grid-auto" });
+  recentSection.append(recentGrid);
+  root.append(recentSection);
 
-  filtersRow.append(searchInput, pillGroup);
-  root.append(filtersRow);
-
-  function createPill(label, type) {
-    const pill = h(
-      "button",
-      {
-        className: `pill${type === activeType ? " active" : ""}`,
-        onClick: () => {
-          activeType = type;
-          pillGroup.querySelectorAll(".pill").forEach((p) => p.classList.remove("active"));
-          pill.classList.add("active");
-          renderGrid();
-        },
-      },
-      label
-    );
-    if (type === null) pill.classList.add("active");
-    return pill;
-  }
-
-  // Grid
-  const grid = h("div", { className: "grid-auto" });
-  root.append(grid);
-
-  renderSkeletons(grid, 6);
-
-  let sites = [];
+  renderSkeletons(recentGrid, 6);
 
   try {
-    const [sitesData, statsData] = await Promise.all([fetchSites(), fetchStats()]);
-    sites = sitesData;
+    const [sites, stats] = await Promise.all([fetchSites(), fetchStats()]);
 
     setContent(
       statsRow,
-      statCard(formatNumber(statsData.totalSites), "Sites Mapped"),
-      statCard(formatNumber(statsData.totalCapabilities), "Capabilities"),
-      statCard(formatNumber(statsData.totalPages), "Pages Indexed")
+      statCard(formatNumber(stats.totalSites), "Sites Mapped"),
+      statCard(formatNumber(stats.totalCapabilities), "Capabilities"),
+      statCard(formatNumber(stats.totalPages), "Pages Indexed")
     );
 
-    renderGrid();
+    // Show latest 6 sites by crawl date
+    const recent = [...sites]
+      .sort((a, b) => new Date(b.crawledAt ?? 0) - new Date(a.crawledAt ?? 0))
+      .slice(0, 6);
+
+    if (recent.length === 0) {
+      setContent(recentGrid, h("div", { className: "empty-state" }, [
+        h("div", { className: "empty-state-icon" }, "\u{1F578}\u{FE0F}"),
+        h("div", { className: "empty-state-title" }, "No sites yet"),
+        h("p", {}, "Use webmcp-mapper to crawl your first site."),
+      ]));
+    } else {
+      setContent(recentGrid, ...recent.map(siteCard));
+    }
   } catch (err) {
-    renderError(grid, `Failed to load sites: ${err.message}`, () => renderDashboard(container));
-  }
-
-  function renderGrid() {
-    let filtered = sites;
-
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (s) =>
-          s.title.toLowerCase().includes(q) ||
-          s.url.toLowerCase().includes(q) ||
-          s.id.toLowerCase().includes(q)
-      );
-    }
-
-    if (activeType) {
-      filtered = filtered.filter((s) => (s.typeDistribution[activeType] ?? 0) > 0);
-    }
-
-    if (filtered.length === 0) {
-      renderEmpty(grid, "\u{1F50D}", "No sites found", searchQuery ? "Try a different search." : "No site data available.");
-      return;
-    }
-
-    setContent(grid, ...filtered.map(siteCard));
+    renderError(statsRow, `Failed to load: ${err.message}`, () => renderDashboard(container));
   }
 }
 
@@ -149,6 +113,23 @@ function siteCard(site) {
       ]),
     ]
   );
+}
+
+function quickAction(title, description, path, onClick) {
+  const attrs = {
+    className: "quick-action-card",
+  };
+
+  if (path) {
+    attrs.onClick = () => navigate(path);
+  } else if (onClick) {
+    attrs.onClick = onClick;
+  }
+
+  return h("div", attrs, [
+    h("div", { className: "quick-action-title" }, title),
+    h("div", { className: "quick-action-desc" }, description),
+  ]);
 }
 
 function statCard(value, label) {

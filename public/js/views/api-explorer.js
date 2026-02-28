@@ -1,4 +1,11 @@
-import { h, setContent, renderSkeletons, renderError, renderEmpty } from "../utils.js";
+import {
+  h,
+  setContent,
+  renderSkeletons,
+  renderError,
+  renderEmpty,
+  createTabNav,
+} from "../utils.js";
 import { fetchSite } from "../api.js";
 import { setState } from "../state.js";
 import { methodBadge } from "../components/badge.js";
@@ -13,10 +20,16 @@ export async function renderApiExplorer(container, siteId) {
   try {
     const site = await fetchSite(siteId);
     setState("currentSite", { ...site, id: siteId });
+    setState("breadcrumbs", [
+      { label: "Home", path: "/" },
+      { label: "Sites", path: "/sites" },
+      { label: site.title || siteId, path: `/site/${siteId}` },
+      { label: "API Explorer" },
+    ]);
     renderApiContent(root, site, siteId);
   } catch (err) {
     renderError(root, `Failed to load API endpoints: ${err.message}`, () =>
-      renderApiExplorer(container, siteId)
+      renderApiExplorer(container, siteId),
     );
   }
 }
@@ -27,18 +40,15 @@ function renderApiContent(root, site, siteId) {
   setContent(root);
 
   // Tab nav
-  root.append(
-    h("div", { className: "tab-nav" }, [
-      h("a", { href: `#/site/${siteId}` }, "Overview"),
-      h("a", { href: `#/site/${siteId}/capabilities` }, "Capabilities"),
-      h("a", { href: `#/site/${siteId}/timeline` }, "Timeline"),
-      h("a", { href: `#/site/${siteId}/api`, className: "active" }, `API (${endpoints.length})`),
-    ])
-  );
+  root.append(createTabNav(siteId, "api"));
 
   if (endpoints.length === 0) {
-    renderEmpty(root, "\u{1F517}", "No API endpoints discovered",
-      "This site either has no API endpoints or they weren't detected during crawling.");
+    renderEmpty(
+      root,
+      "\u{1F517}",
+      "No API endpoints discovered",
+      "This site either has no API endpoints or they weren't detected during crawling.",
+    );
     return;
   }
 
@@ -52,7 +62,8 @@ function renderApiContent(root, site, siteId) {
 
   function createMethodPill(label, method) {
     const count = method
-      ? endpoints.filter((e) => (e.method ?? "GET").toUpperCase() === method).length
+      ? endpoints.filter((e) => (e.method ?? "GET").toUpperCase() === method)
+          .length
       : endpoints.length;
     if (method && count === 0) return null;
 
@@ -62,12 +73,14 @@ function renderApiContent(root, site, siteId) {
         className: `pill${method === activeMethod ? " active" : ""}`,
         onClick: () => {
           activeMethod = method;
-          filterRow.querySelectorAll(".pill").forEach((p) => p.classList.remove("active"));
+          filterRow
+            .querySelectorAll(".pill")
+            .forEach((p) => p.classList.remove("active"));
           pill.classList.add("active");
           renderList();
         },
       },
-      `${label} (${count})`
+      `${label} (${count})`,
     );
     if (method === null) pill.classList.add("active");
     return pill;
@@ -84,13 +97,13 @@ function renderApiContent(root, site, siteId) {
     let filtered = endpoints;
     if (activeMethod) {
       filtered = filtered.filter(
-        (e) => (e.method ?? "GET").toUpperCase() === activeMethod
+        (e) => (e.method ?? "GET").toUpperCase() === activeMethod,
       );
     }
 
     setContent(
       listContainer,
-      ...filtered.map((endpoint) => renderEndpoint(endpoint))
+      ...filtered.map((endpoint) => renderEndpoint(endpoint)),
     );
   }
 }
@@ -111,11 +124,18 @@ function renderEndpoint(endpoint) {
       methodBadge(endpoint.method ?? "GET"),
       h("span", { className: "api-endpoint-url" }, endpoint.url),
       endpoint.contentType
-        ? h("span", {
-            style: { color: "var(--text-muted)", fontSize: "var(--font-size-xs)" },
-          }, endpoint.contentType)
+        ? h(
+            "span",
+            {
+              style: {
+                color: "var(--text-muted)",
+                fontSize: "var(--font-size-xs)",
+              },
+            },
+            endpoint.contentType,
+          )
         : null,
-    ]
+    ],
   );
 
   // Build detail content
@@ -123,34 +143,78 @@ function renderEndpoint(endpoint) {
 
   if (endpoint.discoveredFrom) {
     detailChildren.push(
-      h("div", { style: { fontSize: "var(--font-size-sm)", color: "var(--text-muted)", marginBottom: "var(--space-3)" } }, [
-        h("span", {}, "Discovered from: "),
-        h("span", { className: "mono" }, endpoint.discoveredFrom),
-      ])
+      h(
+        "div",
+        {
+          style: {
+            fontSize: "var(--font-size-sm)",
+            color: "var(--text-muted)",
+            marginBottom: "var(--space-3)",
+          },
+        },
+        [
+          h("span", {}, "Discovered from: "),
+          h("span", { className: "mono" }, endpoint.discoveredFrom),
+        ],
+      ),
     );
   }
 
   if (endpoint.requestShape && Object.keys(endpoint.requestShape).length > 0) {
     detailChildren.push(
       h("div", { className: "mb-3" }, [
-        h("div", { style: { fontSize: "var(--font-size-xs)", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: "var(--space-2)" } }, "Request Shape"),
+        h(
+          "div",
+          {
+            style: {
+              fontSize: "var(--font-size-xs)",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              marginBottom: "var(--space-2)",
+            },
+          },
+          "Request Shape",
+        ),
         renderShape(endpoint.requestShape),
-      ])
+      ]),
     );
   }
 
-  if (endpoint.responseShape && Object.keys(endpoint.responseShape).length > 0) {
+  if (
+    endpoint.responseShape &&
+    Object.keys(endpoint.responseShape).length > 0
+  ) {
     detailChildren.push(
       h("div", {}, [
-        h("div", { style: { fontSize: "var(--font-size-xs)", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: "var(--space-2)" } }, "Response Shape"),
+        h(
+          "div",
+          {
+            style: {
+              fontSize: "var(--font-size-xs)",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              marginBottom: "var(--space-2)",
+            },
+          },
+          "Response Shape",
+        ),
         renderShape(endpoint.responseShape),
-      ])
+      ]),
     );
   }
 
   if (detailChildren.length === 0) {
     detailChildren.push(
-      h("p", { style: { color: "var(--text-muted)", fontSize: "var(--font-size-sm)" } }, "No additional details available.")
+      h(
+        "p",
+        {
+          style: {
+            color: "var(--text-muted)",
+            fontSize: "var(--font-size-sm)",
+          },
+        },
+        "No additional details available.",
+      ),
     );
   }
 
@@ -170,8 +234,8 @@ function renderShape(shape) {
         h("tr", {}, [
           h("td", { className: "shape-key" }, key),
           h("td", { className: "shape-type" }, String(type)),
-        ])
-      )
-    )
+        ]),
+      ),
+    ),
   );
 }

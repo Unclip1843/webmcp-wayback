@@ -1,4 +1,11 @@
-import { h, setContent, renderSkeletons, renderError, renderEmpty } from "../utils.js";
+import {
+  h,
+  setContent,
+  renderSkeletons,
+  renderError,
+  renderEmpty,
+  createTabNav,
+} from "../utils.js";
 import { fetchSite } from "../api.js";
 import { setState } from "../state.js";
 import { capabilityCard } from "../components/capability-card.js";
@@ -14,10 +21,16 @@ export async function renderCapabilities(container, siteId) {
   try {
     const site = await fetchSite(siteId);
     setState("currentSite", { ...site, id: siteId });
+    setState("breadcrumbs", [
+      { label: "Home", path: "/" },
+      { label: "Sites", path: "/sites" },
+      { label: site.title || siteId, path: `/site/${siteId}` },
+      { label: "Capabilities" },
+    ]);
     renderCapabilitiesContent(root, site, siteId);
   } catch (err) {
     renderError(root, `Failed to load capabilities: ${err.message}`, () =>
-      renderCapabilities(container, siteId)
+      renderCapabilities(container, siteId),
     );
   }
 }
@@ -32,14 +45,7 @@ function renderCapabilitiesContent(root, site, siteId) {
   setContent(root);
 
   // Tab nav
-  root.append(
-    h("div", { className: "tab-nav" }, [
-      h("a", { href: `#/site/${siteId}` }, "Overview"),
-      h("a", { href: `#/site/${siteId}/capabilities`, className: "active" }, `Capabilities (${allCaps.length})`),
-      h("a", { href: `#/site/${siteId}/timeline` }, "Timeline"),
-      h("a", { href: `#/site/${siteId}/api` }, "API"),
-    ])
-  );
+  root.append(createTabNav(siteId, "capabilities"));
 
   // Toolbar
   const toolbar = h("div", { className: "capabilities-toolbar" });
@@ -61,12 +67,14 @@ function renderCapabilitiesContent(root, site, siteId) {
         className: `pill${type === activeType ? " active" : ""}`,
         onClick: () => {
           activeType = type;
-          pillGroup.querySelectorAll(".pill").forEach((p) => p.classList.remove("active"));
+          pillGroup
+            .querySelectorAll(".pill")
+            .forEach((p) => p.classList.remove("active"));
           pill.classList.add("active");
           renderList();
         },
       },
-      label
+      label,
     );
     if (type === null) pill.classList.add("active");
     return pill;
@@ -74,33 +82,51 @@ function renderCapabilitiesContent(root, site, siteId) {
 
   // Group by toggle
   const groupToggle = h("div", { className: "pill-group" }, [
-    h("button", {
-      className: "pill active",
-      onClick: (e) => {
-        groupBy = null;
-        groupToggle.querySelectorAll(".pill").forEach((p) => p.classList.remove("active"));
-        e.target.classList.add("active");
-        renderList();
+    h(
+      "button",
+      {
+        className: "pill active",
+        onClick: (e) => {
+          groupBy = null;
+          groupToggle
+            .querySelectorAll(".pill")
+            .forEach((p) => p.classList.remove("active"));
+          e.target.classList.add("active");
+          renderList();
+        },
       },
-    }, "No grouping"),
-    h("button", {
-      className: "pill",
-      onClick: (e) => {
-        groupBy = "type";
-        groupToggle.querySelectorAll(".pill").forEach((p) => p.classList.remove("active"));
-        e.target.classList.add("active");
-        renderList();
+      "No grouping",
+    ),
+    h(
+      "button",
+      {
+        className: "pill",
+        onClick: (e) => {
+          groupBy = "type";
+          groupToggle
+            .querySelectorAll(".pill")
+            .forEach((p) => p.classList.remove("active"));
+          e.target.classList.add("active");
+          renderList();
+        },
       },
-    }, "By type"),
-    h("button", {
-      className: "pill",
-      onClick: (e) => {
-        groupBy = "page";
-        groupToggle.querySelectorAll(".pill").forEach((p) => p.classList.remove("active"));
-        e.target.classList.add("active");
-        renderList();
+      "By type",
+    ),
+    h(
+      "button",
+      {
+        className: "pill",
+        onClick: (e) => {
+          groupBy = "page";
+          groupToggle
+            .querySelectorAll(".pill")
+            .forEach((p) => p.classList.remove("active"));
+          e.target.classList.add("active");
+          renderList();
+        },
       },
-    }, "By page"),
+      "By page",
+    ),
   ]);
 
   toolbar.append(searchInput, pillGroup, groupToggle);
@@ -125,18 +151,24 @@ function renderCapabilitiesContent(root, site, siteId) {
         (c) =>
           c.name.toLowerCase().includes(q) ||
           c.description.toLowerCase().includes(q) ||
-          (c.page ?? "").toLowerCase().includes(q)
+          (c.page ?? "").toLowerCase().includes(q),
       );
     }
 
     // Sort
     filtered = [...filtered].sort((a, b) => {
-      if (sortBy === "confidence") return (b.confidence ?? 0) - (a.confidence ?? 0);
+      if (sortBy === "confidence")
+        return (b.confidence ?? 0) - (a.confidence ?? 0);
       return (a.name ?? "").localeCompare(b.name ?? "");
     });
 
     if (filtered.length === 0) {
-      renderEmpty(list, "\u26A1", "No capabilities found", "Try adjusting your filters.");
+      renderEmpty(
+        list,
+        "\u26A1",
+        "No capabilities found",
+        "Try adjusting your filters.",
+      );
       return;
     }
 
@@ -151,7 +183,11 @@ function renderCapabilitiesContent(root, site, siteId) {
       const elements = [];
       for (const [key, caps] of groups) {
         elements.push(
-          h("div", { className: "sidebar-section mt-4" }, `${key} (${caps.length})`)
+          h(
+            "div",
+            { className: "sidebar-section mt-4" },
+            `${key} (${caps.length})`,
+          ),
         );
         for (const cap of caps) {
           elements.push(capabilityCard(cap));

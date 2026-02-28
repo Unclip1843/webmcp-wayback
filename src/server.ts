@@ -151,6 +151,329 @@ async function handleApi(
     return;
   }
 
+  // GET /api/sites/:siteId/screenshots — list screenshots for a version
+  const screenshotsListMatch = pathname.match(
+    /^\/api\/sites\/([a-zA-Z0-9_-]+)\/screenshots$/,
+  );
+  if (screenshotsListMatch) {
+    const siteId = screenshotsListMatch[1];
+    const version = url.searchParams.get("version");
+    const vDir = await resolveVersionDir(
+      sitesDir,
+      siteId,
+      version ?? undefined,
+    );
+    if (!vDir) {
+      sendJson(res, 200, { version: null, pages: [] });
+      return;
+    }
+    const ssDir = join(vDir, "raw", "screenshots");
+    let files: string[];
+    try {
+      files = await readdir(ssDir);
+    } catch {
+      sendJson(res, 200, { version: version ?? "latest", pages: [] });
+      return;
+    }
+    // Load playwright.json to get page URLs
+    let pageUrls: string[] = [];
+    try {
+      const pwRaw = await readFile(
+        join(vDir, "raw", "playwright.json"),
+        "utf-8",
+      );
+      const pwData = JSON.parse(pwRaw);
+      pageUrls = (pwData.snapshots ?? []).map(
+        (s: { url: string }) => s.url ?? "",
+      );
+    } catch {
+      // no playwright data
+    }
+    const pages = files
+      .filter((f) => f.match(/^\d+\.png$/))
+      .map((f) => {
+        const idx = parseInt(f.replace(".png", ""), 10);
+        return {
+          index: idx,
+          url: pageUrls[idx] ?? "",
+          screenshotUrl: `/api/sites/${siteId}/screenshot/${f}?version=${version ?? ""}`,
+        };
+      })
+      .sort((a, b) => a.index - b.index);
+    sendJson(res, 200, { version: version ?? "latest", pages });
+    return;
+  }
+
+  // GET /api/sites/:siteId/screenshots/:version/:index.png — serve screenshot binary
+  const screenshotBinMatch = pathname.match(
+    /^\/api\/sites\/([a-zA-Z0-9_-]+)\/screenshots\/(v\d+)\/(\d+)\.png$/,
+  );
+  if (screenshotBinMatch) {
+    const [, siteId, version, index] = screenshotBinMatch;
+    if (!VERSION_RE.test(version)) {
+      sendJson(res, 400, { error: "Invalid version" });
+      return;
+    }
+    const vDir = await resolveVersionDir(sitesDir, siteId, version);
+    if (!vDir) {
+      sendJson(res, 404, { error: "Not found" });
+      return;
+    }
+    const screenshotPath = join(vDir, "raw", "screenshots", `${index}.png`);
+    await requireSafePath(screenshotPath, join(sitesDir, siteId));
+    const data = await readFile(screenshotPath);
+    res.writeHead(200, {
+      "Content-Type": "image/png",
+      "Cache-Control": "public, max-age=86400",
+    });
+    res.end(data);
+    return;
+  }
+
+  // GET /api/sites/:siteId/timeline — version metadata for timeline
+  const timelineMatch = pathname.match(
+    /^\/api\/sites\/([a-zA-Z0-9_-]+)\/timeline$/,
+  );
+  if (timelineMatch) {
+    const siteId = timelineMatch[1];
+    const versions = await listVersions(sitesDir, siteId);
+    const timeline = [];
+    for (const v of versions) {
+      const vDir = join(sitesDir, siteId, "versions", `v${v.version}`);
+      let pageCount = 0;
+      let capabilityCount = 0;
+      let screenshotCount = 0;
+      let htmlPageCount = 0;
+      try {
+        const siteMap = await loadSiteMap(sitesDir, siteId, `v${v.version}`);
+        if (siteMap) {
+          pageCount = (siteMap.pages ?? []).length;
+          capabilityCount = (siteMap.capabilities ?? []).length;
+        }
+      } catch {
+        /* skip */
+      }
+      try {
+        const ssFiles = await readdir(join(vDir, "raw", "screenshots"));
+        screenshotCount = ssFiles.filter((f: string) =>
+          f.endsWith(".png"),
+        ).length;
+      } catch {
+        /* no screenshots */
+      }
+      try {
+        const htmlFiles = await readdir(join(vDir, "raw", "html-pages"));
+        htmlPageCount = htmlFiles.filter((f: string) =>
+          f.endsWith(".html"),
+        ).length;
+      } catch {
+        /* no html pages */
+      }
+      timeline.push({
+        version: v.version,
+        date: v.crawledAt,
+        pageCount,
+        capabilityCount,
+        screenshotCount,
+        htmlPageCount,
+      });
+    }
+    sendJson(res, 200, timeline);
+    return;
+  }
+
+  // GET /api/analytics/overview — aggregate analytics
+  if (pathname === "/api/analytics/overview") {
+    const sites = await listSites(sitesDir);
+    const totalCaps = sites.reduce((s, site) => s + site.capabilityCount, 0);
+    const totalPages = sites.reduce((s, site) => s + site.pageCount, 0);
+    let totalVersions = 0;
+    let totalScreenshots = 0;
+    const capsByType: Record<string, number> = {};
+    const recentCrawls: Array<{
+      siteId: string;
+      version: number;
+      date: string;
+    }> = [];
+
+    for (const site of sites) {
+      totalVersions += site.versions;
+      for (const [type, count] of Object.entries(site.typeDistribution)) {
+        capsByType[type] = (capsByType[type] ?? 0) + count;
+      }
+      const versions = await listVersions(sitesDir, site.id);
+      for (const v of versions) {
+        try {
+          const ssDir = join(
+            sitesDir,
+            site.id,
+            "versions",
+            `v${v.version}`,
+            "raw",
+            "screenshots",
+          );
+          const files = await readdir(ssDir);
+          totalScreenshots += files.filter((f: string) =>
+            f.endsWith(".png"),
+          ).length;
+        } catch {
+          /* skip */
+        }
+        recentCrawls.push({
+          siteId: site.id,
+          version: v.version,
+          date: v.crawledAt,
+        });
+      }
+    }
+
+    recentCrawls.sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
+
+    sendJson(res, 200, {
+      totalSites: sites.length,
+      totalCapabilities: totalCaps,
+      totalVersions,
+      totalPages,
+      totalScreenshots,
+      capsByType,
+      sitesByCapCount: sites
+        .map((s) => ({ id: s.id, title: s.title, count: s.capabilityCount }))
+        .sort((a, b) => b.count - a.count),
+      recentCrawls: recentCrawls.slice(0, 10),
+    });
+    return;
+  }
+
+  // GET /api/sites/:siteId/analytics — per-site analytics
+  const siteAnalyticsMatch = pathname.match(
+    /^\/api\/sites\/([a-zA-Z0-9_-]+)\/analytics$/,
+  );
+  if (siteAnalyticsMatch) {
+    const siteId = siteAnalyticsMatch[1];
+    const versions = await listVersions(sitesDir, siteId);
+    const capsOverTime: Array<{
+      version: number;
+      date: string;
+      count: number;
+      types: Record<string, number>;
+    }> = [];
+    const pagesOverTime: Array<{ version: number; count: number }> = [];
+
+    for (const v of versions) {
+      const siteMap = await loadSiteMap(sitesDir, siteId, `v${v.version}`);
+      if (!siteMap) continue;
+      const caps = siteMap.capabilities ?? [];
+      const types: Record<string, number> = {};
+      for (const c of caps) {
+        types[c.type] = (types[c.type] ?? 0) + 1;
+      }
+      capsOverTime.push({
+        version: v.version,
+        date: v.crawledAt,
+        count: caps.length,
+        types,
+      });
+      pagesOverTime.push({
+        version: v.version,
+        count: (siteMap.pages ?? []).length,
+      });
+    }
+
+    // Compute diffs between adjacent versions
+    const versionDiffs: Array<{
+      from: number;
+      to: number;
+      added: number;
+      removed: number;
+    }> = [];
+    for (let i = 1; i < capsOverTime.length; i++) {
+      const prev = capsOverTime[i - 1];
+      const curr = capsOverTime[i];
+      versionDiffs.push({
+        from: prev.version,
+        to: curr.version,
+        added: Math.max(0, curr.count - prev.count),
+        removed: Math.max(0, prev.count - curr.count),
+      });
+    }
+
+    sendJson(res, 200, { capsOverTime, pagesOverTime, versionDiffs });
+    return;
+  }
+
+  // GET /api/sites/:siteId/network — categorized network requests
+  const networkMatch = pathname.match(
+    /^\/api\/sites\/([a-zA-Z0-9_-]+)\/network$/,
+  );
+  if (networkMatch) {
+    const siteId = networkMatch[1];
+    const version = url.searchParams.get("version");
+    const vDir = await resolveVersionDir(
+      sitesDir,
+      siteId,
+      version ?? undefined,
+    );
+    if (!vDir) {
+      sendJson(res, 200, { apis: [], resources: [], thirdParty: [] });
+      return;
+    }
+    try {
+      const raw = await readFile(join(vDir, "raw", "network.json"), "utf-8");
+      const data = JSON.parse(raw);
+      const requests = data.requests ?? [];
+      // Get site URL for origin comparison
+      const siteMap = await loadSiteMap(sitesDir, siteId);
+      let siteOrigin = "";
+      try {
+        if (siteMap?.url) siteOrigin = new URL(siteMap.url).origin;
+      } catch {
+        /* skip */
+      }
+
+      const apis: typeof requests = [];
+      const resources: typeof requests = [];
+      const thirdParty: typeof requests = [];
+
+      for (const req of requests) {
+        const entry = {
+          url: req.url ?? "",
+          method: req.method ?? "GET",
+          status: req.responseStatus ?? 0,
+          contentType: req.responseContentType ?? "",
+          size: req.responseSize ?? 0,
+          type: req.type ?? "",
+        };
+        let reqOrigin = "";
+        try {
+          reqOrigin = new URL(entry.url).origin;
+        } catch {
+          /* skip */
+        }
+        const isThirdParty =
+          siteOrigin && reqOrigin && reqOrigin !== siteOrigin;
+
+        if (isThirdParty) {
+          thirdParty.push(entry);
+        } else if (
+          entry.contentType.includes("json") ||
+          entry.type === "xhr" ||
+          entry.type === "fetch" ||
+          entry.url.includes("/api/")
+        ) {
+          apis.push(entry);
+        } else {
+          resources.push(entry);
+        }
+      }
+      sendJson(res, 200, { apis, resources, thirdParty });
+    } catch {
+      sendJson(res, 200, { apis: [], resources: [], thirdParty: [] });
+    }
+    return;
+  }
+
   // GET /api/stats — aggregate statistics
   if (pathname === "/api/stats") {
     const sites = await listSites(sitesDir);
