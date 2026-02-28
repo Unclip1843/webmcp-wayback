@@ -15,10 +15,7 @@ export function renderSidebar(container) {
 
   // Main navigation links
   function updateMainNav() {
-    setContent(
-      mainNav,
-      navLink("/", "\u{1F3E0}", "Dashboard"),
-    );
+    setContent(mainNav, navLink("/", "\u{1F3E0}", "Dashboard"));
   }
 
   // Site-specific nav (shown when viewing a site)
@@ -36,7 +33,8 @@ export function renderSidebar(container) {
         navLink(`/site/${id}/capabilities`, "\u{26A1}", "Capabilities"),
         navLink(`/site/${id}/timeline`, "\u{1F552}", "Timeline"),
         navLink(`/site/${id}/api`, "\u{1F517}", "API Explorer"),
-      ])
+        navLink(`/site/${id}/mirror`, "\u{1F5BC}\u{FE0F}", "Mirror"),
+      ]),
     );
   });
 

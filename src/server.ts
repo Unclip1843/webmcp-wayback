@@ -5,6 +5,8 @@ import {
 } from "node:http";
 import { readFile, readdir, stat, realpath } from "node:fs/promises";
 import { join, extname, resolve } from "node:path";
+import { search, rebuildIndex } from "./search-index.js";
+import { rewriteHtml, generateStructureView } from "./mirror.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -34,7 +36,7 @@ export function startServer(opts: ServerOptions): void {
 
     try {
       if (pathname.startsWith("/api/")) {
-        await handleApi(pathname, url, res, dataDir);
+        await handleApi(pathname, url, req, res, dataDir);
       } else {
         await serveStatic(pathname, res, publicDir);
       }
@@ -58,6 +60,7 @@ export function startServer(opts: ServerOptions): void {
 async function handleApi(
   pathname: string,
   url: URL,
+  req: IncomingMessage,
   res: ServerResponse,
   dataDir: string,
 ): Promise<void> {
@@ -167,26 +170,172 @@ async function handleApi(
     return;
   }
 
-  // GET /api/search?q=... — search across all sites
+  // GET /api/search?q=... — indexed search across all sites
   if (pathname === "/api/search") {
-    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    const q = url.searchParams.get("q") ?? "";
     if (!q) {
       sendJson(res, 400, { error: "Missing q parameter" });
       return;
     }
-    const sites = await listSitesWithMaps(sitesDir);
-    const results: unknown[] = [];
-    for (const { siteId, siteMap } of sites) {
-      for (const cap of (siteMap as any).capabilities ?? []) {
-        if (
-          cap.name.toLowerCase().includes(q) ||
-          cap.description.toLowerCase().includes(q)
-        ) {
-          results.push({ ...cap, siteId, siteUrl: siteMap.url });
-        }
-      }
+    const result = await search(dataDir, {
+      q,
+      type: url.searchParams.get("type") ?? undefined,
+      site: url.searchParams.get("site") ?? undefined,
+      auth: url.searchParams.get("auth") ?? undefined,
+      urlPattern:
+        (url.searchParams.get("urlPattern") ?? "").slice(0, 200) || undefined,
+      limit: Math.max(
+        1,
+        parseInt(url.searchParams.get("limit") ?? "50", 10) || 50,
+      ),
+      offset: Math.max(
+        0,
+        parseInt(url.searchParams.get("offset") ?? "0", 10) || 0,
+      ),
+    });
+    sendJson(res, 200, result);
+    return;
+  }
+
+  // POST /api/search/rebuild — rebuild search index
+  if (pathname === "/api/search/rebuild" && req.method === "POST") {
+    const result = await rebuildIndex(dataDir);
+    sendJson(res, 200, { rebuilt: true, ...result });
+    return;
+  }
+
+  // GET /api/sites/:siteId/mirror/index — list captured HTML pages
+  const mirrorIndexMatch = pathname.match(
+    /^\/api\/sites\/([a-zA-Z0-9_-]+)\/mirror\/index$/,
+  );
+  if (mirrorIndexMatch) {
+    const siteId = mirrorIndexMatch[1]!;
+    const version = url.searchParams.get("version");
+    const vDir = await resolveVersionDir(
+      sitesDir,
+      siteId,
+      version ?? undefined,
+    );
+    if (!vDir) {
+      sendJson(res, 404, { error: "Not found" });
+      return;
     }
-    sendJson(res, 200, results);
+    const indexPath = join(vDir, "raw", "html-index.json");
+    try {
+      const raw = await readFile(indexPath, "utf-8");
+      sendJson(res, 200, JSON.parse(raw));
+    } catch {
+      sendJson(res, 200, []);
+    }
+    return;
+  }
+
+  // GET /api/sites/:siteId/mirror/:pageIndex — serve rewritten HTML or structure view
+  const mirrorPageMatch = pathname.match(
+    /^\/api\/sites\/([a-zA-Z0-9_-]+)\/mirror\/(\d+)$/,
+  );
+  if (mirrorPageMatch) {
+    const siteId = mirrorPageMatch[1]!;
+    const pageIndex = mirrorPageMatch[2]!;
+    const mode = url.searchParams.get("mode") ?? "full";
+    const version = url.searchParams.get("version");
+    const vDir = await resolveVersionDir(
+      sitesDir,
+      siteId,
+      version ?? undefined,
+    );
+    if (!vDir) {
+      sendJson(res, 404, { error: "Not found" });
+      return;
+    }
+
+    if (mode === "structure") {
+      // Load playwright snapshot for this page
+      const pwPath = join(vDir, "raw", "playwright.json");
+      try {
+        const pwRaw = await readFile(pwPath, "utf-8");
+        const pwData = JSON.parse(pwRaw);
+        const idx = parseInt(pageIndex, 10);
+        // For Playwright pages (index < 1000), use directly
+        // For Firecrawl pages (index >= 1000), no structure available
+        if (idx >= 1000) {
+          res.writeHead(200, {
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy":
+              "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'",
+          });
+          res.end(
+            "<html><body style='color:#888;padding:2rem;font-family:sans-serif'>" +
+              "<p>Structure view not available for Firecrawl-captured pages.</p></body></html>",
+          );
+          return;
+        }
+        const snapshot = pwData.snapshots?.[idx];
+        if (!snapshot) {
+          sendJson(res, 404, { error: "Page not found" });
+          return;
+        }
+        const html = generateStructureView(snapshot);
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Security-Policy":
+            "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'",
+        });
+        res.end(html);
+      } catch {
+        sendJson(res, 404, { error: "Playwright data not found" });
+      }
+      return;
+    }
+
+    // Full mirror mode
+    const htmlPath = join(vDir, "raw", "html-pages", `${pageIndex}.html`);
+    await requireSafePath(htmlPath, join(sitesDir, siteId));
+
+    const MAX_MIRROR_SIZE = 10 * 1024 * 1024;
+    let rawHtml: Buffer;
+    try {
+      rawHtml = await readFile(htmlPath);
+    } catch {
+      sendJson(res, 404, { error: "HTML page not found" });
+      return;
+    }
+
+    if (rawHtml.length > MAX_MIRROR_SIZE) {
+      sendJson(res, 413, { error: "Page too large to mirror" });
+      return;
+    }
+
+    // Load html-index for link rewriting
+    let htmlIdx: Array<{ index: number; url: string; source: string }> = [];
+    try {
+      const idxRaw = await readFile(
+        join(vDir, "raw", "html-index.json"),
+        "utf-8",
+      );
+      htmlIdx = JSON.parse(idxRaw);
+    } catch {
+      // No index available
+    }
+
+    // Find current page URL from index
+    const currentEntry = htmlIdx.find((e) => String(e.index) === pageIndex);
+    const pageUrl = currentEntry?.url ?? "";
+
+    const rewritten = rewriteHtml(
+      rawHtml.toString("utf-8"),
+      pageUrl,
+      siteId,
+      htmlIdx,
+    );
+
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy":
+        "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'none'; frame-ancestors 'self'",
+      "X-Frame-Options": "SAMEORIGIN",
+    });
+    res.end(rewritten);
     return;
   }
 
@@ -245,25 +394,6 @@ async function listSites(sitesDir: string): Promise<
   return sites;
 }
 
-async function listSitesWithMaps(
-  sitesDir: string,
-): Promise<Array<{ siteId: string; siteMap: Record<string, unknown> }>> {
-  let entries: string[];
-  try {
-    entries = await readdir(sitesDir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const entry of entries) {
-    const siteMap = await loadSiteMap(sitesDir, entry);
-    if (siteMap) {
-      results.push({ siteId: entry, siteMap });
-    }
-  }
-  return results;
-}
-
 async function listVersions(
   sitesDir: string,
   siteId: string,
@@ -292,6 +422,8 @@ async function listVersions(
   return versions.sort((a, b) => a.version - b.version);
 }
 
+const VERSION_RE = /^v\d+$/;
+
 async function resolveVersionDir(
   sitesDir: string,
   siteId: string,
@@ -305,6 +437,7 @@ async function resolveVersionDir(
   }
 
   if (version) {
+    if (!VERSION_RE.test(version)) return null;
     const vDir = join(siteDir, "versions", version);
     try {
       await stat(vDir);
